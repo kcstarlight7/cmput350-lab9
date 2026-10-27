@@ -38,15 +38,47 @@ struct DynamicCamera {
                 const sf::Vector2f& trackedVelocityWorld  // world velocity of player to track
     ) {
         // TODO: (HINTS/outline)
-        // collect statistics on the player position and velocity in (normalized, if you like)
-        // window coordinates. Compute lookAhead distance in world coords, adjusting for
-        // if the player is moving left or right.
-        // Now update lookAhead state using an EMA over its previous state and the lookAhead world
-        // vector. Then determine if the player is in the dead zone, soft rejection zone, or hard
-        // rejection zone. For each, perform EMA on the delta of the camera displacement (ignoring
-        // lookahead) appropriately. Next,
-        // set the camera center by offsetting the cameraUnadjustedCenter, combining lookAhead.
+        // collect statistics on the player position and velocity in (normalized, if you like) window coordinates. 
+        sf::Vector2f playerPosWindow = camera.worldToWindow(trackedPosWorld);
+        sf::Vector2f playerVelocityWindow = camera.worldToWindowDist(trackedVelocityWorld);
+
+        // Compute lookAhead distance in world coords, adjusting for if the player is moving left or right.
+        sf::Vector2f lookAheadDistWorld = camera.windowPercentToWorldDist({lookAhead, 0});
+        // Now update lookAhead state using an EMA over its previous state and the lookAhead world vector.
+        if (playerVelocityWindow.x > 0) {
+            lookaheadState = lookaheadState + alpha * (lookAheadDistWorld.x - lookaheadState);
+            cameraUnadjustedCenter.x = lookaheadState + trackedPosWorld.x;
+        } else if (playerVelocityWindow.x < 0) {
+            lookAheadDistWorld.x *= -1;
+            lookaheadState = lookaheadState + alpha * (lookAheadDistWorld.x - lookaheadState);
+            cameraUnadjustedCenter.x = lookaheadState + trackedPosWorld.x;
+        } 
+
+        // Then determine if the player is in the dead zone, soft rejection zone, or hard rejection zone. 
+        // For each, perform EMA on the delta of the camera displacement (ignoring lookahead) appropriately. 
+        // Next, set the camera center by offsetting the cameraUnadjustedCenter, combining lookAhead.
         // Finally update cameraUnadjustedCenter, but without lookahead.
+        float playerPosPercent = camera.worldToWindowPercent(trackedPosWorld).x;
+        
+        if (!deadZoneX.contains(playerPosPercent)) {
+            // deadzone: innermost
+            // ideal: do nothing
+         
+            // softzone: between two lines
+            // ideal: lookahead while moving, else push camera back so player aligns with green line
+            float distancePercent(deadZoneX.signedDistance(playerPosPercent)); // distance between player and closest boundary in percent
+            sf::Vector2f edgeCoordWorld;
+            if (trackedVelocityWorld.x < 0) {
+                edgeCoordWorld = camera.windowPercentToWorld({playerPosPercent - distancePercent, camera.worldToWindowPercent(trackedPosWorld).y});
+            } else {
+                edgeCoordWorld = camera.windowPercentToWorld({playerPosPercent + distancePercent, camera.worldToWindowPercent(trackedPosWorld).y});
+            }
+            
+            //if player not moving, gradually ease player pos to edge
+            cameraUnadjustedCenter.x += alpha * (edgeCoordWorld.x - cameraUnadjustedCenter.x);
+            
+        }
+        camera.setCameraCenter(cameraUnadjustedCenter);
     }
 
     float alpha;  // alpha to use for damping of camera position, *as well as* for smoothing of
@@ -56,8 +88,7 @@ struct DynamicCamera {
     Interval softZoneX = {-INF, INF};
     // (everything beyond softZone is considered hard zone).
     float lookAhead;  // screen-percentage lookahead
-    mutable sf::Vector2f
-        cameraUnadjustedCenter;      // the camera world center from last frame, ignoring lookahead
+    mutable sf::Vector2f cameraUnadjustedCenter;  // the camera world center from last frame, ignoring lookahead
     mutable float lookaheadState{};  // the EMA of the accumulated lookahead offset in world coords
 };
 
